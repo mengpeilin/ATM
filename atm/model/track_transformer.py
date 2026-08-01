@@ -159,7 +159,8 @@ class TrackTransformer(nn.Module):
         b, n, _ = patches.shape
         mask = torch.rand(b, n, device=patches.device) < p
         masked_patches = patches.clone()
-        masked_patches[mask] = self.mask_token
+        # under mixed precision the patches are autocast while the parameter stays fp32
+        masked_patches[mask] = self.mask_token.to(masked_patches.dtype)
         return masked_patches
 
     def _mask_track_as_first(self, track):

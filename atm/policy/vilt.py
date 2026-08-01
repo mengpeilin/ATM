@@ -160,6 +160,8 @@ class BCViLTPolicy(nn.Module):
                 use_joint=("joint_states" in self.extra_state_keys),
                 use_gripper=("gripper_states" in self.extra_state_keys),
                 use_ee=("ee_states" in self.extra_state_keys),
+                use_left_arm=("left_arm_states" in self.extra_state_keys),
+                use_right_arm=("right_arm_states" in self.extra_state_keys),
                 **extra_state_encoder_cfg
             )
 

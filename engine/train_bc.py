@@ -48,7 +48,19 @@ def main(cfg: DictConfig):
     val_vis_dataset = BCDataset(dataset_dir=cfg.val_dataset, num_demos=cfg.val_num_demos, vis=True, **cfg.dataset_cfg, aug_prob=0.)
     val_vis_dataloader = get_dataloader(val_vis_dataset, mode="train", num_workers=1, batch_size=1)
 
-    fabric = Fabric(accelerator="cuda", devices=list(cfg.train_gpus), precision="bf16-mixed" if cfg.mix_precision else None, strategy="deepspeed")
+    strategy = cfg.get("strategy", "deepspeed")
+    if strategy == "ddp":
+        # With use_language_token=False the language encoder produces no gradient, which plain DDP
+        # rejects; deepspeed tolerated it implicitly.
+        # broadcast_buffers=False is required because evaluate()/visualize() run on rank 0 only: with
+        # buffer broadcasting on, the policy's BatchNorm buffers turn each of those forwards into a
+        # collective that the other ranks never join, and training deadlocks until the NCCL timeout.
+        # Only rank 0 is checkpointed and BatchNorm uses batch statistics while training, so letting
+        # the other ranks' running stats drift is harmless.
+        from lightning.fabric.strategies import DDPStrategy
+
+        strategy = DDPStrategy(find_unused_parameters=True, broadcast_buffers=False)
+    fabric = Fabric(accelerator="cuda", devices=list(cfg.train_gpus), precision="bf16-mixed" if cfg.mix_precision else None, strategy=strategy)
     fabric.launch()
 
     None if (cfg.dry or not fabric.is_global_zero) else init_wandb(cfg)
@@ -67,6 +79,10 @@ def main(cfg: DictConfig):
 
     fabric.barrier()
     model, optimizer = fabric.setup(model, optimizer)
+    # Fabric only routes marked methods through the strategy (and its autocast), so the training and
+    # visualization entry points have to be declared explicitly.
+    model.mark_forward_method("forward_loss")
+    model.mark_forward_method("forward_vis")
     train_loader = fabric.setup_dataloaders(train_loader)
 
     # Pick ckpt based on  the average of the last 5 epochs
@@ -113,7 +129,7 @@ def main(cfg: DictConfig):
                         )
                 None if cfg.dry else wandb.log(val_metrics, step=epoch)
 
-        if epoch % cfg.save_freq == 0:
+        if epoch % cfg.save_freq == 0 and fabric.is_global_zero:
             model.save(f"{work_dir}/model_{epoch}.ckpt")
 
             def vis_and_log(model, vis_dataloader, mode="train"):
@@ -126,10 +142,10 @@ def main(cfg: DictConfig):
                                                 f"{mode}/rollout_track": wandb_vid_rollout},
                                                 step=epoch)
 
-            if fabric.is_global_zero and hasattr(model, "forward_vis"):
+            if hasattr(model, "forward_vis"):
                 vis_and_log(model, train_vis_dataloader, mode="train")
                 vis_and_log(model, val_vis_dataloader, mode="val")
-
+        if epoch % cfg.save_freq == 0:
             gathered_results = [{} for _ in range(fabric.world_size)]
             results = rollout(rollout_env, model, 20 // cfg.env_cfg.vec_env_num, horizon=rollout_horizon)
             fabric.barrier()
@@ -167,10 +183,6 @@ def run_one_epoch(fabric,
     model.train()
     i = 0
     for obs, track_obs, track, task_emb, action, extra_states in tqdm(dataloader):
-        if mix_precision:
-            obs, track_obs, track, task_emb, action = obs.bfloat16(), track_obs.bfloat16(), track.bfloat16(), task_emb.bfloat16(), action.bfloat16()
-            extra_states = {k: v.bfloat16() for k, v in extra_states.items()}
-
         loss, ret_dict = model.forward_loss(obs, track_obs, track, task_emb, extra_states, action)
         optimizer.zero_grad()
         fabric.backward(loss)
@@ -206,10 +218,6 @@ def evaluate(model, dataloader, mix_precision=False, tag="val"):
     for obs, track_obs, track, task_emb, action, extra_states in tqdm(dataloader):
         obs, track_obs, track, task_emb, action = obs.cuda(), track_obs.cuda(), track.cuda(), task_emb.cuda(), action.cuda()
         extra_states = {k: v.cuda() for k, v in extra_states.items()}
-        if mix_precision:
-            obs, track_obs, track, task_emb, action = obs.bfloat16(), track_obs.bfloat16(), track.bfloat16(), task_emb.bfloat16(), action.bfloat16()
-            extra_states = {k: v.bfloat16() for k, v in extra_states.items()}
-
         _, ret_dict = model.forward_loss(obs, track_obs, track, task_emb, extra_states, action)
 
         i += 1
@@ -235,9 +243,6 @@ def visualize(model, dataloader, mix_precision=False):
     for obs, track_obs, track, task_emb, action, extra_states in dataloader:
         obs, track_obs, track, task_emb = obs.cuda(), track_obs.cuda(), track.cuda(), task_emb.cuda()
         extra_states = {k: v.cuda() for k, v in extra_states.items()}
-        if mix_precision:
-            obs, track_obs, track, task_emb = obs.bfloat16(), track_obs.bfloat16(), track.bfloat16(), task_emb.bfloat16()
-            extra_states = {k: v.bfloat16() for k, v in extra_states.items()}
         _, eval_dict = model.forward_vis(obs, track_obs, track, task_emb, extra_states, action)
         keep_eval_dict = eval_dict
         break

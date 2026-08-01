@@ -20,7 +20,7 @@ def main(cfg: DictConfig):
     setup(cfg)
     OmegaConf.save(config=cfg, f=os.path.join(work_dir, "config.yaml"))
 
-    fabric = Fabric(accelerator="cuda", devices=list(cfg.train_gpus), precision="bf16-mixed" if cfg.mix_precision else None, strategy="deepspeed")
+    fabric = Fabric(accelerator="cuda", devices=list(cfg.train_gpus), precision="bf16-mixed" if cfg.mix_precision else None, strategy=cfg.get("strategy", "deepspeed"))
     fabric.launch()
 
     None if (cfg.dry or not fabric.is_global_zero) else init_wandb(cfg)
@@ -43,6 +43,10 @@ def main(cfg: DictConfig):
     scheduler = setup_lr_scheduler(optimizer, cfg.scheduler_cfg)
 
     model, optimizer = fabric.setup(model, optimizer)
+    # Fabric only routes marked methods through the strategy (and its autocast), so the training and
+    # visualization entry points have to be declared explicitly.
+    model.mark_forward_method("forward_loss")
+    model.mark_forward_method("forward_vis")
     train_loader = fabric.setup_dataloaders(train_loader)
 
     lbd_track = cfg.lbd_track
@@ -137,8 +141,6 @@ def run_one_epoch(fabric,
     model.train()
     i = 0
     for vid, track, vis, task_emb in tqdm(dataloader):
-        if mix_precision:
-            vid, track, vis, task_emb = vid.bfloat16(), track.bfloat16(), vis.bfloat16(), task_emb.bfloat16()
         b, t, c, h, w = vid.shape
         b, tl, n, _ = track.shape
         b, tl, n = vis.shape
@@ -148,7 +150,8 @@ def run_one_epoch(fabric,
             task_emb,
             lbd_track=lbd_track,
             lbd_img=lbd_img,
-            p_img=p_img)  # do not use vis
+            p_img=p_img,
+            vis=vis)
         optimizer.zero_grad()
         fabric.backward(loss)
 
@@ -156,9 +159,11 @@ def run_one_epoch(fabric,
 
         optimizer.step()
 
-        track_loss += ret_dict["track_loss"]
-        vid_loss += ret_dict["img_loss"]
-        tot_loss += ret_dict["loss"]
+        # forward_loss returns means over the batch. Weight each mean by its batch size so the
+        # epoch metrics remain true per-sample means when the final batch is smaller.
+        track_loss += ret_dict["track_loss"] * b
+        vid_loss += ret_dict["img_loss"] * b
+        tot_loss += ret_dict["loss"] * b
         tot_items += b
 
         i += 1
@@ -182,8 +187,6 @@ def evaluate(model, dataloader, lbd_track, lbd_img, p_img, mix_precision=False, 
     i = 0
     for vid, track, vis, task_emb in tqdm(dataloader):
         vid, track, vis, task_emb = vid.cuda(), track.cuda(), vis.cuda(), task_emb.cuda()
-        if mix_precision:
-            vid, track, vis, task_emb = vid.bfloat16(), track.bfloat16(), vis.bfloat16(), task_emb.bfloat16()
         b, t, c, h, w = vid.shape
         b, tl, n, _ = track.shape
 
@@ -196,9 +199,9 @@ def evaluate(model, dataloader, lbd_track, lbd_img, p_img, mix_precision=False, 
             p_img=p_img,
             vis=vis)
 
-        track_loss += ret_dict["track_loss"]
-        vid_loss += ret_dict["img_loss"]
-        tot_loss += ret_dict["loss"]
+        track_loss += ret_dict["track_loss"] * b
+        vid_loss += ret_dict["img_loss"] * b
+        tot_loss += ret_dict["loss"] * b
         tot_items += b
 
         i += 1
@@ -218,8 +221,6 @@ def visualize(model, dataloader, mix_precision=False):
 
     for i, (vid, track, vis, task_emb) in enumerate(dataloader):
         vid, track, task_emb = vid.cuda(), track.cuda(), task_emb.cuda()
-        if mix_precision:
-            vid, track, task_emb = vid.bfloat16(), track.bfloat16(), task_emb.bfloat16()
         _, eval_dict = model.forward_vis(vid, track, task_emb, p_img=0)
         if keep_eval_dict is None or torch.rand(1) < 0.1:
             keep_eval_dict = eval_dict

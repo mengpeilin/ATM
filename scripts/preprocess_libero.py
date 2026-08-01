@@ -50,6 +50,7 @@ def get_task_embs(cfg, descriptions):
             add_special_tokens=True,  # Add [CLS] and [SEP]
             max_length=cfg.data.max_word_len,  # maximum length of a sentence
             padding="max_length",
+            truncation=True,  # required for datasets whose instructions are full sentences
             return_attention_mask=True,  # Generate the attention mask
             return_tensors="pt",  # ask the function to return PyTorch tensors
         )

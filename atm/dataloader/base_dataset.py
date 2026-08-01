@@ -142,9 +142,9 @@ class BaseDataset(Dataset):
         task_embs = demo["root"]["task_emb_bert"]
         extra_states_dict = {k: demo["root"]["extra_states"][k] for k in self.extra_state_keys}
 
-        # pad action
-        zero_action = np.zeros_like(actions[-1:])
-        actions = np.concatenate([actions, np.repeat(zero_action, pad_length, axis=0)], axis=0)
+        # Absolute pose targets remain valid at the trajectory boundary by holding the final pose.
+        pad_action = actions[-1:]
+        actions = np.concatenate([actions, np.repeat(pad_action, pad_length, axis=0)], axis=0)
 
         # pad extra states
         last_extra_states = {k: v[-1:] for k, v in extra_states_dict.items()}

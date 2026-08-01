@@ -8,9 +8,15 @@ class ExtraModalityTokens(nn.Module):
         use_joint=False,
         use_gripper=False,
         use_ee=False,
+        use_left_arm=False,
+        use_right_arm=False,
         extra_num_layers=0,
         extra_hidden_size=64,
         extra_embedding_size=32,
+        joint_states_dim=7,
+        gripper_states_dim=2,
+        ee_dim=3,
+        arm_states_dim=8,
     ):
         """
         This is a class that maps all extra modality inputs into tokens of the same size
@@ -19,18 +25,18 @@ class ExtraModalityTokens(nn.Module):
         self.use_joint = use_joint
         self.use_gripper = use_gripper
         self.use_ee = use_ee
+        self.use_left_arm = use_left_arm
+        self.use_right_arm = use_right_arm
         self.extra_embedding_size = extra_embedding_size
 
-        joint_states_dim = 7
-        gripper_states_dim = 2
-        ee_dim = 3
-
-        self.num_extra = int(use_joint) + int(use_gripper) + int(use_ee)
+        self.num_extra = int(use_joint) + int(use_gripper) + int(use_ee) + int(use_left_arm) + int(use_right_arm)
 
         extra_low_level_feature_dim = (
             int(use_joint) * joint_states_dim
             + int(use_gripper) * gripper_states_dim
             + int(use_ee) * ee_dim
+            + int(use_left_arm) * arm_states_dim
+            + int(use_right_arm) * arm_states_dim
         )
 
         assert extra_low_level_feature_dim > 0, "[error] no extra information"
@@ -57,6 +63,8 @@ class ExtraModalityTokens(nn.Module):
             (joint_states_dim, self.use_joint, "joint_states"),
             (gripper_states_dim, self.use_gripper, "gripper_states"),
             (ee_dim, self.use_ee, "ee_states"),
+            (arm_states_dim, self.use_left_arm, "left_arm_states"),
+            (arm_states_dim, self.use_right_arm, "right_arm_states"),
         ]:
 
             if use_modality:
@@ -69,9 +77,9 @@ class ExtraModalityTokens(nn.Module):
     def forward(self, obs_dict):
         """
         obs_dict: {
-            (optional) joint_stats: (B, T, 7),
-            (optional) gripper_states: (B, T, 2),
-            (optional) ee: (B, T, 3)
+            (optional) joint_states: (B, T, joint_states_dim),
+            (optional) gripper_states: (B, T, gripper_states_dim),
+            (optional) ee_states: (B, T, ee_dim)
         }
         map above to a latent vector of shape (B, T, H)
         """
@@ -81,6 +89,8 @@ class ExtraModalityTokens(nn.Module):
             (self.use_joint, "joint_states"),
             (self.use_gripper, "gripper_states"),
             (self.use_ee, "ee_states"),
+            (self.use_left_arm, "left_arm_states"),
+            (self.use_right_arm, "right_arm_states"),
         ]:
 
             if use_modality:

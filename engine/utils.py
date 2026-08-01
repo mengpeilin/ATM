@@ -90,20 +90,20 @@ def rollout(env_dict, policy, num_env_rollouts, horizon=None, return_wandb_video
                 success = list(info["success"])
 
                 video_img = rearrange(rgb.copy(), "b v h w c -> b v c h w")
-                b, _, c, h, w = video_img.shape
+                b, num_views, c, h, w = video_img.shape
 
+                separator = np.ones((b, c, h, 2), dtype=np.uint8) * 255
                 if _tracks is not None:
                     _track, _rec_track = _tracks
-                    if connect_points_with_line:
-                        base_track_img = draw_traj_on_images(_rec_track[:, 0], video_img[:, 0])  # (b, c, h, w)
-                        wrist_track_img = draw_traj_on_images(_rec_track[:, 1], video_img[:, 1])
-                        frame = np.concatenate([base_track_img, np.ones((b, c, h, 2), dtype=np.uint8)*255, wrist_track_img], axis=-1)  # (b, c, h, 2w)
-                    else:
-                        base_track_img = combine_track_and_img(_rec_track[:, 0], video_img[:, 0])  # (b, c, h, w)
-                        wrist_track_img = combine_track_and_img(_rec_track[:, 1], video_img[:, 1])
-                        frame = np.concatenate([base_track_img, np.ones((b, c, h, 2), dtype=np.uint8) * 255, wrist_track_img], axis=-1)  # (b, c, h, 2w)
+                    overlay_fn = draw_traj_on_images if connect_points_with_line else combine_track_and_img
+                    view_imgs = [overlay_fn(_rec_track[:, v], video_img[:, v]) for v in range(num_views)]  # v*[(b, c, h, w)]
                 else:
-                    frame = np.concatenate([video_img[:, 0], np.ones((b, c, h, w), dtype=np.uint8)*255, video_img[:, 1]], axis=-1)  # (b, c, h, 2w)
+                    view_imgs = [video_img[:, v] for v in range(num_views)]
+                # interleave the per-view frames with a white separator column
+                frame = np.concatenate(
+                    [img for v, view_img in enumerate(view_imgs) for img in ((view_img,) if v == 0 else (separator, view_img))],
+                    axis=-1,
+                )  # (b, c, h, v*w + (v-1)*2)
 
                 frame = render_done_to_boundary(frame, success)
                 episode_frames.append(frame)
