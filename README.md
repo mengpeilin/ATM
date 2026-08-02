@@ -110,6 +110,20 @@ python -m scripts.eval_libero_policy --suite libero_goal --exp-dir results/polic
 python -m scripts.eval_libero_policy --suite libero_10 --exp-dir results/policy/atm-policy_libero-10_demo10
 ```
 
+## RoboTwin2 ATM Diffusion Policy
+
+The RoboTwin pipeline keeps ATM track pretraining and uses the vendored Diffusion Policy for Stage 2:
+
+```bash
+pip install -e diffusion_policy
+bash scripts/run_task_pipeline.sh place_dual_shoes demo_clean "0,1" "[0,1]"
+```
+
+Stage 2 uses native 240x320 head-camera RGB, a three-observation history, a 16-step diffusion
+horizon, eight executed actions, and full 15-step suffix padding. The frozen Track Transformer sees
+only its dedicated 128x128 copy. To evaluate, copy or symlink `robotwin_policy/ATM_DP` into
+`RoboTwin/policy/ATM_DP`, then set `ckpt_path` and `norm_stats_path` in its deployment config.
+
 ## Citation
 
 If you find our codebase is useful for your research, please cite our paper with this bibtex:

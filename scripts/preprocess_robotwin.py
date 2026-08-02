@@ -7,7 +7,8 @@ ATM wants, per demonstration, one HDF5 file laid out as::
     ├── actions        (T, 16)   normalized absolute bimanual end-effector commands
     ├── task_emb_bert  (768,)
     ├── extra_states/{left_arm_states (T, 8), right_arm_states (T, 8)}
-    └── <view>/{video (1, T, 3, H, W), tracks (1, T, N, 2), vis (1, T, N)}
+    └── <view>/{video (1, T, 3, 128, 128), video_native (1, T, 3, H, W),
+                tracks (1, T, N, 2), vis (1, T, N)}
 
 Actions are the next step's absolute ``[xyz, wxyz quaternion, gripper]`` command for each arm.
 
@@ -157,8 +158,8 @@ def load_or_compute_norm_stats(stats_path, episode_paths, train_ratio):
     return stats
 
 
-def decode_video(episode_h5, view, img_size):
-    """Decode a camera's JPEG frames to (T, 3, H, W) uint8.
+def decode_video(episode_h5, view):
+    """Decode a camera's JPEG frames to native-resolution (T, 3, H, W) uint8.
 
     RoboTwin stores frames via `cv2.imencode` on an RGB array, so `cv2.imdecode` hands the very same
     RGB array back. No colour-space conversion is performed anywhere in this pipeline.
@@ -169,9 +170,19 @@ def decode_video(episode_h5, view, img_size):
         img = cv2.imdecode(np.frombuffer(raw[t], np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"failed to decode frame {t} of view {view}")
-        frames.append(cv2.resize(img, (img_size[1], img_size[0]), interpolation=cv2.INTER_AREA))
+        frames.append(img)
     video = np.stack(frames)  # t h w c
     return rearrange(video, "t h w c -> t c h w")
+
+
+def resize_video(video, img_size):
+    """Make the dedicated square copy consumed by the Track Transformer."""
+    frames = [
+        cv2.resize(rearrange(frame, "c h w -> h w c"),
+                   (img_size[1], img_size[0]), interpolation=cv2.INTER_AREA)
+        for frame in video
+    ]
+    return rearrange(np.stack(frames), "t h w c -> t c h w")
 
 
 def get_instruction_embeddings(root, task, task_config, num_episodes_hint):
@@ -214,7 +225,7 @@ def is_complete(path, views, stats_signature):
             for view in views:
                 if view not in root:
                     return False
-                for key in ("video", "tracks", "vis"):
+                for key in ("video", "video_native", "tracks", "vis"):
                     if key not in root[view]:
                         return False
     except (OSError, KeyError):
@@ -226,7 +237,8 @@ def convert_episode(src_path, dst_path, image_dir, views, img_size, stats, task_
                     tracker, num_points):
     with h5py.File(src_path, "r") as src:
         vec = load_ee_vector(src)
-        videos = {view: decode_video(src, view, img_size) for view in views}
+        native_videos = {view: decode_video(src, view) for view in views}
+        videos = {view: resize_video(native_videos[view], img_size) for view in views}
 
     # Observation t predicts the absolute end-effector target recorded at t+1.
     obs_vec, action_vec = vec[:-1], vec[1:]
@@ -258,6 +270,9 @@ def convert_episode(src_path, dst_path, image_dir, views, img_size, stats, task_
 
             view_grp = root.create_group(view)
             view_grp.create_dataset("video", data=video[None].astype(np.uint8))
+            view_grp.create_dataset(
+                "video_native", data=native_videos[view][:length][None].astype(np.uint8)
+            )
             view_grp.create_dataset("tracks", data=pred_tracks.cpu().numpy())
             view_grp.create_dataset("vis", data=pred_vis.cpu().numpy())
 

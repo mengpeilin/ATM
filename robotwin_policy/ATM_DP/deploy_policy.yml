@@ -1,0 +1,10 @@
+policy_name: ATM_DP
+task_name: null
+task_config: null
+ckpt_setting: null
+seed: null
+instruction_type: unseen
+
+atm_root: /data/peilin/Bimanual_Manipulation/ATM-diffusion
+ckpt_path: null
+norm_stats_path: null

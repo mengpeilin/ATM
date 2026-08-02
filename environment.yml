@@ -12,6 +12,7 @@ dependencies:
       - cloudpickle==1.6.0
       - cmake==3.27.2
       - deepspeed==0.11.1
+      - dill==0.3.5.1
       - diffusers==0.20.1
       - easydict==1.10
       - egl-probe==1.0.2
@@ -49,11 +50,13 @@ dependencies:
       - notebook==7.0.6
       - notebook-shim==0.2.3
       - numba==0.57.1
+      - numcodecs==0.10.2
       - numpy==1.24.3
       - omegaconf==2.3.0
       - opencv-python==4.8.0.76
       - pandas==2.0.3
       - pybullet-svl==3.1.6.4
+      - pytest==7.4.3
       - pynput==1.7.6
       - pytorch-lightning==2.1.0
       - pyyaml==6.0.1
@@ -67,6 +70,7 @@ dependencies:
       - tensorflow-io-gcs-filesystem==0.34.0
       - tensorflow-metadata==1.14.0
       - termcolor==2.3.0
+      - threadpoolctl==3.1.0
       - tf-keras==2.15.0
       - tfds-nightly==4.9.2.dev202308090034
       - timm==0.9.6
@@ -76,4 +80,5 @@ dependencies:
       - tqdm==4.66.1
       - transformers==4.31.0
       - wandb==0.15.9
+      - zarr==2.12.0
 prefix: /home/cwen/anaconda3/envs/atm
