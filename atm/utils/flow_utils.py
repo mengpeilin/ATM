@@ -158,6 +158,7 @@ def tracks_to_binary_img(tracks, img_size):
     """
     from einops import repeat
     B, T, N, C = tracks.shape
+    output_size = (img_size, img_size) if isinstance(img_size, int) else tuple(img_size)
     generation_size = 128
     H, W = generation_size, generation_size
 
@@ -183,10 +184,10 @@ def tracks_to_binary_img(tracks, img_size):
     kernel = torch.FloatTensor(kernel)[None, None, :, :].to(tracks.device)
     img = F.conv2d(img, kernel, padding=2)[:, 0, :, :]
     img = rearrange(img, '(b t) h w -> b t h w', b=B)
-    if generation_size != img_size:
-        img = F.interpolate(img, size=(img_size, img_size), mode="bicubic")
+    if (generation_size, generation_size) != output_size:
+        img = F.interpolate(img, size=output_size, mode="bicubic")
     img = torch.clamp(img, 0, 1)
-    img = torch.where(img < 0.05, torch.tensor(0.0), img)
+    img = torch.where(img < 0.05, torch.zeros_like(img), img)
 
     img = repeat(img, 'b t h w -> b t c h w', c=3)
 
@@ -197,6 +198,7 @@ def tracks_to_binary_img(tracks, img_size):
 def tracks_to_video(tracks, img_size):
     """
     tracks: (B, T, N, 2), where each track is a sequence of (u, v) coordinates; u is width, v is height
+    img_size: int for square output or (height, width)
     return: (B, C, H, W)
     """
     B, T, N, _ = tracks.shape
@@ -225,7 +227,7 @@ def combine_track_and_img(track: torch.Tensor, vid: np.ndarray):
     vid: [B, C, H, W]
     return: (B, C, H, W)
     """
-    img_size = vid.shape[-1]
+    img_size = vid.shape[-2:]
     track_video = tracks_to_video(track, img_size)  # B 3 H W
     track_video = track_video.detach().cpu().numpy()
     vid = vid.copy().astype(np.float32)

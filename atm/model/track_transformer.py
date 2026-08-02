@@ -278,8 +278,8 @@ class TrackTransformer(nn.Module):
         track = track.clone()
         rec_track = rec_track.clone()
 
-        rec_track_vid = tracks_to_video(rec_track, img_size=H)
-        track_vid = tracks_to_video(track, img_size=H)
+        rec_track_vid = tracks_to_video(rec_track, img_size=(H, W))
+        track_vid = tracks_to_video(track, img_size=(H, W))
 
         combined_track_vid = torch.cat([track_vid, rec_track_vid], dim=-1)
 

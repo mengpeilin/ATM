@@ -105,7 +105,8 @@ class ImgViewDiffTranslationAug(nn.Module):
             translate_h = repeat(translate_h, "b -> b 1 1 1")  # (b, 1, 1, 1)
             translate_w = repeat(translate_w, "b -> b 1 1 1")
 
-            tracks[..., 0] += translate_h
-            tracks[..., 1] += translate_w
+            # Tracks store (x / width, y / height); keep the axes distinct for rectangular RGB.
+            tracks[..., 0] += translate_w
+            tracks[..., 1] += translate_h
 
         return out, tracks

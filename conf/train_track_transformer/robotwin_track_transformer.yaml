@@ -41,7 +41,7 @@ dim_head: null
 heads: 8
 depth: 8
 
-img_size: 128
+img_size: [240, 320]
 frame_stack: 1
 num_track_ts: 16
 num_track_ids: 32

@@ -2,9 +2,8 @@
 
 The tracks stored by ``scripts/preprocess_robotwin`` are ~1098 points per episode (98 grid points
 followed by 1000 randomly sampled ones), held as in-picture coordinates in [0, 1]. Because they are
-normalized they can be drawn on any resolution, so by default this renders on the *original*
-RoboTwin frames rather than the 128x128 crops the model consumes - the scene stays legible and it
-doubles as a check that the tracks really are aligned with the source data.
+normalized they can be drawn on any resolution. RoboTwin preprocessing and both learned stages now
+retain the original 240x320 frames, so the raw and preprocessed modes should align exactly.
 
 Points are coloured by their initial height in the frame and carry a short motion tail. Points that
 CoTracker reports as occluded are drawn hollow, so you can watch visibility drop out.
@@ -13,7 +12,7 @@ Usage::
 
     python -m scripts.visualize_dataset_tracks --task place_dual_shoes --episode 0
     python -m scripts.visualize_dataset_tracks --task place_dual_shoes --episode 0 \
-        --source preprocessed --scale 4          # exactly what the model sees, upscaled
+        --source preprocessed --scale 2          # exactly what both learned stages see
 """
 import os
 
@@ -66,7 +65,7 @@ def point_colors(first_xy, cmap_name="gist_rainbow"):
 @click.option("--save-root", default="./data/atm_robotwin", help="Where preprocessing wrote the episodes.")
 @click.option("--raw-root", default=RAW_ROOT, help="Root of the raw RoboTwin dataset.")
 @click.option("--source", type=click.Choice(["raw", "preprocessed"]), default="raw",
-              help="'raw' draws on the original RoboTwin frames; 'preprocessed' on the 128x128 crops.")
+              help="Choose raw JPEGs or the canonical preprocessed 240x320 frames.")
 @click.option("--out", default="./tt_vis", help="Output directory.")
 @click.option("--scale", default=2, type=int, help="Integer upscale applied before drawing.")
 @click.option("--tail", default=8, type=int, help="Frames of motion history drawn behind each point.")

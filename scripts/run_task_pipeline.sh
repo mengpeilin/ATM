@@ -26,7 +26,7 @@ cd "$ATM_ROOT"
 mkdir -p "$LOG_DIR"
 
 echo "=== [$TASK] 1/4 preprocess ==="
-if [ -f "${DATA_DIR}/.preprocess_native_rgb_done" ]; then
+if [ -f "${DATA_DIR}/.preprocess_native_tt_done" ]; then
     echo "already preprocessed, skipping"
 else
     # Compute train-only statistics once before workers start, avoiding validation leakage and races.
@@ -48,7 +48,7 @@ else
         pids+=($!)
     done
     for p in "${pids[@]}"; do wait "$p"; done
-    touch "${DATA_DIR}/.preprocess_native_rgb_done"
+    touch "${DATA_DIR}/.preprocess_native_tt_done"
 fi
 
 echo "=== [$TASK] 2/4 train/val split ==="

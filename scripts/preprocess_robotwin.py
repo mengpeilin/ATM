@@ -7,8 +7,7 @@ ATM wants, per demonstration, one HDF5 file laid out as::
     ├── actions        (T, 16)   normalized absolute bimanual end-effector commands
     ├── task_emb_bert  (768,)
     ├── extra_states/{left_arm_states (T, 8), right_arm_states (T, 8)}
-    └── <view>/{video (1, T, 3, 128, 128), video_native (1, T, 3, H, W),
-                tracks (1, T, N, 2), vis (1, T, N)}
+    └── <view>/{video (1, T, 3, 240, 320), tracks (1, T, N, 2), vis (1, T, N)}
 
 Actions are the next step's absolute ``[xyz, wxyz quaternion, gripper]`` command for each arm.
 
@@ -41,6 +40,7 @@ COTRACKER_CKPT = os.path.join(COTRACKER_ROOT, "checkpoints/scaled_offline.pth")
 
 # [left_endpose(7: xyz + wxyz quat), left_gripper, right_endpose(7), right_gripper]
 EE_VECTOR_DIM = 16
+NATIVE_IMAGE_SIZE = (240, 320)
 LEFT_POSE_SLICE = slice(0, 7)
 LEFT_GRIPPER_IDX = 7
 RIGHT_POSE_SLICE = slice(8, 15)
@@ -175,16 +175,6 @@ def decode_video(episode_h5, view):
     return rearrange(video, "t h w c -> t c h w")
 
 
-def resize_video(video, img_size):
-    """Make the dedicated square copy consumed by the Track Transformer."""
-    frames = [
-        cv2.resize(rearrange(frame, "c h w -> h w c"),
-                   (img_size[1], img_size[0]), interpolation=cv2.INTER_AREA)
-        for frame in video
-    ]
-    return rearrange(np.stack(frames), "t h w c -> t c h w")
-
-
 def get_instruction_embeddings(root, task, task_config, num_episodes_hint):
     """BERT embedding of each episode's first `seen` instruction, deduplicated across episodes."""
     instruction_dir = os.path.join(root, task, task_config, "instructions")
@@ -225,20 +215,27 @@ def is_complete(path, views, stats_signature):
             for view in views:
                 if view not in root:
                     return False
-                for key in ("video", "video_native", "tracks", "vis"):
+                for key in ("video", "tracks", "vis"):
                     if key not in root[view]:
                         return False
+                if tuple(root[view]["video"].shape[-2:]) != NATIVE_IMAGE_SIZE:
+                    return False
     except (OSError, KeyError):
         return False
     return True
 
 
-def convert_episode(src_path, dst_path, image_dir, views, img_size, stats, task_emb,
+def convert_episode(src_path, dst_path, image_dir, views, stats, task_emb,
                     tracker, num_points):
     with h5py.File(src_path, "r") as src:
         vec = load_ee_vector(src)
-        native_videos = {view: decode_video(src, view) for view in views}
-        videos = {view: resize_video(native_videos[view], img_size) for view in views}
+        videos = {view: decode_video(src, view) for view in views}
+    for view, video in videos.items():
+        if tuple(video.shape[-2:]) != NATIVE_IMAGE_SIZE:
+            raise ValueError(
+                f"expected native D435 RGB at {NATIVE_IMAGE_SIZE}, got {tuple(video.shape[-2:])} "
+                f"for {view} in {src_path}"
+            )
 
     # Observation t predicts the absolute end-effector target recorded at t+1.
     obs_vec, action_vec = vec[:-1], vec[1:]
@@ -270,9 +267,6 @@ def convert_episode(src_path, dst_path, image_dir, views, img_size, stats, task_
 
             view_grp = root.create_group(view)
             view_grp.create_dataset("video", data=video[None].astype(np.uint8))
-            view_grp.create_dataset(
-                "video_native", data=native_videos[view][:length][None].astype(np.uint8)
-            )
             view_grp.create_dataset("tracks", data=pred_tracks.cpu().numpy())
             view_grp.create_dataset("vis", data=pred_vis.cpu().numpy())
 
@@ -313,7 +307,6 @@ def relabel_episode(src_path, dst_path, stats):
 @click.option("--task-config", type=str, default="demo_clean")
 @click.option("--views", type=str, default="head_camera",
               help="Comma-separated camera names to convert.")
-@click.option("--img-size", type=int, default=128)
 @click.option("--num-points", type=int, default=1000, help="Random points sampled for tracking.")
 @click.option("--start-episode", type=int, default=0)
 @click.option("--num-episodes", type=int, default=-1, help="-1 converts every episode.")
@@ -323,10 +316,9 @@ def relabel_episode(src_path, dst_path, stats):
 @click.option("--stats-only", is_flag=True, help="Compute normalization statistics and exit.")
 @click.option("--labels-only", is_flag=True,
               help="Rewrite state/action labels in existing files without rerunning CoTracker.")
-def main(root, save, task, task_config, views, img_size, num_points, start_episode, num_episodes,
+def main(root, save, task, task_config, views, num_points, start_episode, num_episodes,
          skip_exist, train_ratio, stats_only, labels_only):
     views = [v.strip() for v in views.split(",") if v.strip()]
-    img_size = (img_size, img_size)
 
     src_dir = os.path.join(root, task, task_config, "data")
     episode_paths = natsorted(glob(os.path.join(src_dir, "episode*.hdf5")))
@@ -368,7 +360,7 @@ def main(root, save, task, task_config, views, img_size, num_points, start_episo
             if skip_exist and is_complete(dst_path, views, norm_stats_signature(stats)):
                 continue
 
-            convert_episode(src_path, dst_path, image_dir, views, img_size, stats,
+            convert_episode(src_path, dst_path, image_dir, views, stats,
                             episode_to_emb[episode_idx], tracker, num_points)
 
     if episode_to_text:

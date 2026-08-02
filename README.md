@@ -119,9 +119,8 @@ pip install -e diffusion_policy
 bash scripts/run_task_pipeline.sh place_dual_shoes demo_clean "0,1" "[0,1]"
 ```
 
-Stage 2 uses native 240x320 head-camera RGB, a three-observation history, a 16-step diffusion
-horizon, eight executed actions, and full 15-step suffix padding. The frozen Track Transformer sees
-only its dedicated 128x128 copy. To evaluate, copy or symlink `robotwin_policy/ATM_DP` into
+Both stages use native 240x320 head-camera RGB. Stage 2 uses a three-observation history, a 16-step
+diffusion horizon, eight executed actions, and full 15-step suffix padding. To evaluate, copy or symlink `robotwin_policy/ATM_DP` into
 `RoboTwin/policy/ATM_DP`, then set `ckpt_path` and `norm_stats_path` in its deployment config.
 
 ## Citation
