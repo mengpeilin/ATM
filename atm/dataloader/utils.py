@@ -106,7 +106,8 @@ class ImgViewDiffTranslationAug(nn.Module):
             translate_w = repeat(translate_w, "b -> b 1 1 1")
 
             # Tracks store (x / width, y / height); keep the axes distinct for rectangular RGB.
-            tracks[..., 0] += translate_w
-            tracks[..., 1] += translate_h
+            # A crop displaced right/down moves the retained image content left/up.
+            tracks[..., 0] -= translate_w
+            tracks[..., 1] -= translate_h
 
         return out, tracks

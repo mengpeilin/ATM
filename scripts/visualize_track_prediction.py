@@ -19,14 +19,13 @@ backdrop of true motion. Two seeding modes (``--sampling``) control what's drawn
 Usage::
 
     python -m scripts.visualize_track_prediction \
-        --track-fn results/track_transformer/tt_dual_shoes_0731_1212 \
-        --task place_dual_shoes --episode 0
+        --task place_object_stand --episode 0
 
     python -m scripts.visualize_track_prediction --sampling gt \
-        --track-fn results/track_transformer/tt_dual_shoes_0731_1212 \
-        --task place_dual_shoes --episode 0
+        --task place_object_stand --episode 0
 """
 import os
+from pathlib import Path
 
 import click
 import cv2
@@ -53,12 +52,34 @@ def load_episode(save_root, task_config, task, episode, view):
     return video, tracks, vis, task_emb
 
 
-def load_model(track_fn, device):
+def find_track_run(results_root, task):
+    """Return the newest completed TrackTransformer run trained for ``task``."""
+    candidates = []
+    for config_path in Path(results_root).glob("*/config.yaml"):
+        checkpoint_path = config_path.parent / "model_best.ckpt"
+        if not checkpoint_path.is_file():
+            continue
+        cfg = OmegaConf.load(config_path)
+        dataset_paths = [str(path) for key in ("train_dataset", "val_dataset")
+                         for path in cfg.get(key, [])]
+        if any(task in Path(path).parts for path in dataset_paths):
+            candidates.append((checkpoint_path.stat().st_mtime, config_path.parent))
+    if not candidates:
+        raise click.ClickException(
+            f"No completed TrackTransformer run for task '{task}' under {results_root}"
+        )
+    return str(max(candidates, key=lambda item: item[0])[1])
+
+
+def load_model(track_fn, checkpoint, device):
     cfg = OmegaConf.load(os.path.join(track_fn, "config.yaml"))
-    cfg.model_cfg.load_path = os.path.join(track_fn, "model_best.ckpt")
+    checkpoint_path = checkpoint if os.path.isabs(checkpoint) else os.path.join(track_fn, checkpoint)
+    if not os.path.isfile(checkpoint_path):
+        raise click.ClickException(f"Checkpoint does not exist: {checkpoint_path}")
+    cfg.model_cfg.load_path = checkpoint_path
     model = TrackTransformer(**cfg.model_cfg)
     model.eval().to(device)
-    return model, cfg
+    return model, cfg, checkpoint_path
 
 
 def sample_point_ids(vis, num_points, seed):
@@ -90,10 +111,13 @@ def pad_window(arr, start, length):
 
 
 @click.command()
-@click.option("--track-fn", required=True,
-              help="Directory with config.yaml + model_best.ckpt, "
-                   "e.g. results/track_transformer/tt_dual_shoes_0731_1212")
-@click.option("--task", default="place_dual_shoes")
+@click.option("--track-fn", default=None,
+              help="TrackTransformer run directory. By default, select the newest completed run trained for --task.")
+@click.option("--results-root", default="./results/track_transformer", show_default=True,
+              help="Run root searched when --track-fn is omitted.")
+@click.option("--checkpoint", default="model_best.ckpt", show_default=True,
+              help="Checkpoint filename inside --track-fn, or an absolute checkpoint path.")
+@click.option("--task", default="place_object_stand", show_default=True)
 @click.option("--task-config", default="demo_clean")
 @click.option("--episode", default=0, type=int)
 @click.option("--view", default="head_camera")
@@ -111,12 +135,18 @@ def pad_window(arr, start, length):
               help="Cap on how many of the ~1000+ stored GT points to draw in green; -1 draws all of them.")
 @click.option("--stride", default=1, type=int, help="Steps between rolled-out starting frames.")
 @click.option("--fps", default=10, type=int)
-def main(track_fn, task, task_config, episode, view, save_root, out, scale, sampling, num_points, seed,
-         max_gt_points, stride, fps):
+@click.option("--device", default=None,
+              help="Torch device, for example cuda:1. Defaults to CUDA when available, otherwise CPU.")
+def main(track_fn, results_root, checkpoint, task, task_config, episode, view, save_root, out, scale,
+         sampling, num_points, seed, max_gt_points, stride, fps, device):
     os.makedirs(out, exist_ok=True)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if track_fn is None:
+        track_fn = find_track_run(results_root, task)
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, cfg = load_model(track_fn, device)
+    model, cfg, checkpoint_path = load_model(track_fn, checkpoint, device)
+    click.echo(f"run: {track_fn}")
+    click.echo(f"checkpoint: {checkpoint_path}")
     num_track_ts = cfg.num_track_ts
 
     video, tracks, vis, task_emb = load_episode(save_root, task_config, task, episode, view)

@@ -116,7 +116,7 @@ The RoboTwin pipeline keeps ATM track pretraining and uses the vendored Diffusio
 
 ```bash
 pip install -e diffusion_policy
-bash scripts/run_task_pipeline.sh place_dual_shoes demo_clean "0,1" "[0,1]"
+bash scripts/run_task_pipeline.sh place_dual_shoes demo_clean "0,1" "[0,1]" 0
 ```
 
 Both stages use native 240x320 head-camera RGB. Stage 2 uses a three-observation history, a 16-step

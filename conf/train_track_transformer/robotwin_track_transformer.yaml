@@ -19,9 +19,12 @@ train_gpus: [0, 1]
 strategy: ddp
 
 # Training. Values follow Table VII of the ATM paper.
-# batch_size is per-device and Fabric shards the dataloader, so on 2 GPUs this is the paper's 1024.
+# Native 240x320 frames produce 300 image tokens. Use a smaller per-device microbatch and
+# accumulation to retain the paper's effective global batch: 64 * 2 GPUs * 8 = 1024.
 lr: 1e-4
-batch_size: 512
+batch_size: 64
+val_batch_size: 64
+gradient_accumulate_steps: 8
 mix_precision: true
 num_workers: 8
 val_freq: 5

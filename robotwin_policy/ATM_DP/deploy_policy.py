@@ -121,6 +121,8 @@ def get_model(usr_args):
     with open(checkpoint_path, "rb") as stream:
         payload = torch.load(stream, pickle_module=dill, map_location="cpu")
     cfg = payload["cfg"]
+    if not os.path.isabs(cfg.policy.track_fn):
+        cfg.policy.track_fn = os.path.join(atm_root, cfg.policy.track_fn)
     workspace_cls = hydra.utils.get_class(cfg._target_)
     workspace = workspace_cls(cfg, output_dir=os.path.dirname(os.path.dirname(checkpoint_path)))
     workspace.load_payload(payload)

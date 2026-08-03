@@ -32,7 +32,9 @@ def main(cfg: DictConfig):
     train_vis_dataloader = get_dataloader(train_vis_dataset, mode="train", num_workers=1, batch_size=1)
 
     val_dataset = ATMPretrainDataset(dataset_dir=cfg.val_dataset, **cfg.dataset_cfg, aug_prob=0.)
-    val_loader = get_dataloader(val_dataset, mode="val", num_workers=cfg.num_workers, batch_size=cfg.batch_size * 2)
+    val_loader = get_dataloader(
+        val_dataset, mode="val", num_workers=cfg.num_workers, batch_size=cfg.val_batch_size
+    )
 
     val_vis_dataset = ATMPretrainDataset(dataset_dir=cfg.val_dataset, vis=True, **cfg.dataset_cfg, aug_prob=0.)
     val_vis_dataloader = get_dataloader(val_vis_dataset, mode="val", num_workers=1, batch_size=1)
@@ -69,6 +71,7 @@ def main(cfg: DictConfig):
             scheduler=scheduler,
             mix_precision=cfg.mix_precision,
             clip_grad=cfg.clip_grad,
+            gradient_accumulate_steps=cfg.gradient_accumulate_steps,
         )
 
         train_metrics["train/lr"] = optimizer.param_groups[0]["lr"]
@@ -132,15 +135,17 @@ def run_one_epoch(fabric,
                   p_img,
                   mix_precision=False,
                   scheduler=None,
-                  clip_grad=1.0):
+                  clip_grad=1.0,
+                  gradient_accumulate_steps=1):
     """
     Optimize the policy. Return a dictionary of the loss and any other metrics.
     """
     track_loss, vid_loss, tot_loss, tot_items = 0, 0, 0, 0
 
     model.train()
-    i = 0
-    for vid, track, vis, task_emb in tqdm(dataloader):
+    optimizer.zero_grad(set_to_none=True)
+    num_batches = len(dataloader)
+    for batch_idx, (vid, track, vis, task_emb) in enumerate(tqdm(dataloader)):
         b, t, c, h, w = vid.shape
         b, tl, n, _ = track.shape
         b, tl, n = vis.shape
@@ -152,12 +157,16 @@ def run_one_epoch(fabric,
             lbd_img=lbd_img,
             p_img=p_img,
             vis=vis)
-        optimizer.zero_grad()
-        fabric.backward(loss)
+        group_start = (batch_idx // gradient_accumulate_steps) * gradient_accumulate_steps
+        group_size = min(gradient_accumulate_steps, num_batches - group_start)
+        should_step = batch_idx + 1 == group_start + group_size
+        with fabric.no_backward_sync(model, enabled=not should_step):
+            fabric.backward(loss / group_size)
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
-
-        optimizer.step()
+        if should_step:
+            fabric.clip_gradients(model, optimizer, max_norm=clip_grad)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
         # forward_loss returns means over the batch. Weight each mean by its batch size so the
         # epoch metrics remain true per-sample means when the final batch is smaller.
@@ -165,8 +174,6 @@ def run_one_epoch(fabric,
         vid_loss += ret_dict["img_loss"] * b
         tot_loss += ret_dict["loss"] * b
         tot_items += b
-
-        i += 1
 
     out_dict = {
         "train/track_loss": track_loss / tot_items,

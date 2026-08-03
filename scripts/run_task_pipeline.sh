@@ -1,20 +1,20 @@
 #!/bin/bash
 # End-to-end ATM-DP pipeline for one RoboTwin task: preprocess -> split -> track transformer -> DP.
 #
-#   bash scripts/run_task_pipeline.sh <task_name> [task_config] [preprocess_gpus] [train_gpus]
+#   bash scripts/run_task_pipeline.sh <task_name> [task_config] [preprocess_gpus] [tt_train_gpus] [stage2_gpu]
 #
 # Example:
-#   bash scripts/run_task_pipeline.sh place_dual_shoes demo_clean "0,1" "[0,1]"
+#   bash scripts/run_task_pipeline.sh place_dual_shoes demo_clean "0,1" "[0,1]" 0
 #
 # Track Transformer hyperparameters follow ATM. Stage 2 uses RoboTwin's image DP settings with a
 # 16-step horizon, eight executed actions and eight data workers.
 set -euo pipefail
 
-TASK=${1:?usage: run_task_pipeline.sh <task_name> [task_config] [preprocess_gpus] [train_gpus]}
+TASK=${1:?usage: run_task_pipeline.sh <task_name> [task_config] [preprocess_gpus] [tt_train_gpus] [stage2_gpu]}
 TASK_CONFIG=${2:-demo_clean}
 PREP_GPUS=${3:-0,1}
-TRAIN_GPUS=${4:-[0,1]}
-STAGE2_GPU=${PREP_GPUS%%,*}
+TT_TRAIN_GPUS=${4:-[0,1]}
+STAGE2_GPU=${5:-0}
 
 ATM_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PY=/data/home/peilin/miniconda3/envs/atm/bin/python
@@ -57,7 +57,7 @@ $PY -m scripts.split_libero_dataset --folder ./data/atm_robotwin/ --train_ratio 
 
 echo "=== [$TASK] 3/4 track transformer ==="
 $PY -m engine.train_track_transformer --config-name=robotwin_track_transformer \
-    experiment="tt_${SHORT}" train_gpus="$TRAIN_GPUS" \
+    experiment="tt_${SHORT}" train_gpus="$TT_TRAIN_GPUS" \
     train_dataset="['${DATA_DIR}/train']" val_dataset="['${DATA_DIR}/val']" \
     > "${LOG_DIR}/tt_${TASK}.log" 2>&1
 
@@ -69,13 +69,14 @@ echo "=== [$TASK] 4/4 ATM diffusion policy ==="
 CUDA_VISIBLE_DEVICES=$STAGE2_GPU $PY diffusion_policy/train.py \
     --config-name=train_robotwin_atm_workspace \
     experiment="atm_dp_${SHORT}" \
-    task.dataset.dataset_dirs="['${DATA_DIR}']" \
+    task.dataset.train_dataset_dirs="['${DATA_DIR}/train']" \
+    task.dataset.val_dataset_dirs="['${DATA_DIR}/val']" \
     policy.track_fn="$TT_DIR" \
     > "${LOG_DIR}/policy_${TASK}.log" 2>&1
 
 POLICY_DIR=$(ls -td ${ATM_ROOT}/results/policy/atm_dp_${SHORT}_* | head -1)
 echo "=== [$TASK] DONE ==="
 echo "policy: $POLICY_DIR"
-echo "install robotwin_policy/ATM_DP under RoboTwin/policy, then evaluate its best checkpoint:"
+echo "install robotwin_policy/ATM_DP under RoboTwin/policy, then evaluate its final checkpoint:"
 echo "  bash policy/ATM_DP/eval.sh $TASK $TASK_CONFIG $TASK_CONFIG 0 0 \\"
-echo "    ${POLICY_DIR}/checkpoints/best.ckpt ${ATM_ROOT}/${DATA_DIR#./}/norm_stats.json"
+echo "    ${POLICY_DIR}/checkpoints/last.ckpt ${ATM_ROOT}/${DATA_DIR#./}/norm_stats.json"
