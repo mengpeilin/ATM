@@ -1,12 +1,12 @@
-"""Render every CoTracker point of a preprocessed episode as an overlay video.
+"""Render every simulator-GT point of a preprocessed episode as an overlay video.
 
-The tracks stored by ``scripts/preprocess_robotwin`` are ~1098 points per episode (98 grid points
-followed by 1000 randomly sampled ones), held as in-picture coordinates in [0, 1]. Because they are
-normalized they can be drawn on any resolution. RoboTwin preprocessing and both learned stages now
-retain the original 240x320 frames, so the raw and preprocessed modes should align exactly.
+The tracks stored by ``scripts/preprocess_robotwin`` are 1,098 points per episode (98 grid points
+followed by 1,000 randomly sampled ones), held as normalized image coordinates. Visible coordinates
+are in [0, 1], while finite offscreen projections can lie outside that range. RoboTwin preprocessing
+and both learned stages retain the original 240x320 frames, so raw and preprocessed modes align.
 
-Points are coloured by their initial height in the frame and carry a short motion tail. Points that
-CoTracker reports as occluded are drawn hollow, so you can watch visibility drop out.
+Points that are occluded or outside the camera frustum are drawn hollow while
+their simulator-projected trajectory remains available.
 
 Usage::
 

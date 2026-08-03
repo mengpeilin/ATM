@@ -1,5 +1,7 @@
-test
-log
+artifacts
+tt_vis
+tests
+logs
 *.egg-info
 __pycache__/
 wandb

@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end ATM-DP pipeline for one RoboTwin task: preprocess -> split -> track transformer -> DP.
+# End-to-end ATM-DP pipeline for one RoboTwin task: simulator-GT preprocess -> split -> track transformer -> DP.
 #
 #   bash scripts/run_task_pipeline.sh <task_name> [task_config] [preprocess_gpus] [tt_train_gpus] [stage2_gpu]
 #
@@ -26,14 +26,29 @@ cd "$ATM_ROOT"
 mkdir -p "$LOG_DIR"
 
 echo "=== [$TASK] 1/4 preprocess ==="
-if [ -f "${DATA_DIR}/.preprocess_native_tt_done" ]; then
-    echo "already preprocessed, skipping"
+GT_MARKER=${DATA_DIR}/.preprocess_simulator_gt_v1_done
+OLD_MARKER=${DATA_DIR}/.preprocess_native_tt_done
+if [ -f "$GT_MARKER" ]; then
+    $PY -m scripts.preprocess_robotwin \
+        --task "$TASK" --task-config "$TASK_CONFIG" --train-ratio 0.95 --verify-only
+    echo "verified existing simulator-GT preprocessing"
 else
+    if [ -f "$OLD_MARKER" ]; then
+        echo "ERROR: stale CoTracker completion marker exists: $OLD_MARKER"
+        echo "Remove or relocate the old ATM dataset before simulator-GT regeneration."
+        exit 1
+    fi
+    if [ -e "${DATA_DIR}/train" ] || [ -e "${DATA_DIR}/val" ]; then
+        echo "ERROR: refusing to mix regenerated simulator-GT tracks with existing train/ or val/ splits"
+        echo "Remove or relocate both split directories before preprocessing."
+        exit 1
+    fi
+
     # Compute train-only statistics once before workers start, avoiding validation leakage and races.
     $PY -m scripts.preprocess_robotwin \
         --task "$TASK" --task-config "$TASK_CONFIG" --train-ratio 0.95 --stats-only
 
-    # Shard the episodes across the available GPUs; CoTracker dominates the runtime here.
+    # Shard cached-trajectory simulator replays across the available rendering GPUs.
     IFS=',' read -ra GPU_ARR <<< "$PREP_GPUS"
     NGPU=${#GPU_ARR[@]}
     NEP=$(ls "/data/peilin/Bimanual_Manipulation/RoboTwin/data/${TASK}/${TASK_CONFIG}/data/" | grep -c 'episode.*\.hdf5')
@@ -48,11 +63,13 @@ else
         pids+=($!)
     done
     for p in "${pids[@]}"; do wait "$p"; done
-    touch "${DATA_DIR}/.preprocess_native_tt_done"
+    $PY -m scripts.preprocess_robotwin \
+        --task "$TASK" --task-config "$TASK_CONFIG" --train-ratio 0.95 --verify-only
+    touch "$GT_MARKER"
 fi
 
 echo "=== [$TASK] 2/4 train/val split ==="
-# Idempotent: split_libero_dataset skips any task that already has a train/ folder.
+# Rebuild symlink-only splits after simulator-GT verification.
 $PY -m scripts.split_libero_dataset --folder ./data/atm_robotwin/ --train_ratio 0.95
 
 echo "=== [$TASK] 3/4 track transformer ==="

@@ -12,6 +12,12 @@ from atm.policy.vilt_modules.language_modules import *
 from .track_patch_embed import TrackPatchEmbed
 from .transformer import Transformer
 
+
+def visibility_loss_weights(vis):
+    """Preserve ATM's 1.0 visible and 0.1 invisible track-target weights."""
+    return torch.where(vis == 0, torch.full_like(vis, 0.1), vis)
+
+
 class TrackTransformer(nn.Module):
     """
     flow video model using a BERT transformer
@@ -232,7 +238,7 @@ class TrackTransformer(nn.Module):
         vis = self._preprocess_vis(vis)
 
         rec_track, rec_patches = self.forward(vid, track, task_emb, p_img)
-        vis[vis == 0] = .1
+        vis = visibility_loss_weights(vis)
         vis = repeat(vis, "b tl n -> b tl n c", c=2)
 
         track_loss = torch.mean((rec_track - track) ** 2 * vis)

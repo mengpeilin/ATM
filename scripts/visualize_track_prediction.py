@@ -1,19 +1,19 @@
 """Roll a trained TrackTransformer across a preprocessed episode and render its predicted 16-step
-track horizon, either against CoTracker ground truth or exactly as the real BCViLTPolicy queries it.
+track horizon, either against simulator ground truth or exactly as the real BCViLTPolicy queries it.
 
 At every timestep t the model is shown only the current frame plus each point's position at t (every
 other timestep in the track window is masked internally by ``TrackTransformer._mask_track_as_first``)
 and asked to predict where all tracked points go over the next ``num_track_ts`` (16) steps. This
 renders that receding-horizon prediction as a video: one output frame per t.
 
-Every real CoTracker point stored for the episode (~1000+) is drawn in green every frame, as a dense
+Every simulator-GT point stored for the episode (1,098) is drawn in green every frame, as a dense
 backdrop of true motion. Two seeding modes (``--sampling``) control what's drawn in red on top:
 
 - ``grid`` (default): matches ``BCViLTPolicy.track_encode`` (atm/policy/vilt.py) exactly -- the query
   points are ``sample_double_grid(4)``, a fixed set of 32 synthetic (u, v) grid coordinates, identical
   every frame/episode/task. This is what the deployed policy actually conditions on; a synthetic grid
   point has no corresponding real track, so it only exists in red.
-- ``gt``: seeds with real CoTracker point ids sampled once from the episode (visible in frame 0), so
+- ``gt``: seeds with simulator-GT point ids sampled once from the episode (visible in frame 0), so
   that particular red prediction can be checked against its own green ground truth directly.
 
 Usage::
@@ -127,7 +127,7 @@ def pad_window(arr, start, length):
 @click.option("--sampling", type=click.Choice(["grid", "gt"]), default="grid",
               help="'grid' reproduces BCViLTPolicy.track_encode's fixed 32-point double grid "
                    "(no ground truth exists for it, so only the prediction is drawn); "
-                   "'gt' seeds with real CoTracker points so the prediction can be checked against them.")
+                   "'gt' seeds with simulator-GT points so the prediction can be checked against them.")
 @click.option("--num-points", default=-1, type=int,
               help="Only used with --sampling gt; -1 uses the model's num_track_ids.")
 @click.option("--seed", default=0, type=int, help="Only used with --sampling gt; selects which points get tracked.")
@@ -154,7 +154,7 @@ def main(track_fn, results_root, checkpoint, task, task_config, episode, view, s
     Hs, Ws = H * scale, W * scale
 
     gt_points = np.arange(tracks.shape[1]) if max_gt_points < 0 else np.arange(min(max_gt_points, tracks.shape[1]))
-    gt_tracks = tracks[:, gt_points]  # (T, n_gt, 2), everything CoTracker tracked for this episode
+    gt_tracks = tracks[:, gt_points]  # (T, n_gt, 2), all stored simulator-GT tracks for this episode
     gt_vis = vis[:, gt_points]        # (T, n_gt) -- occluded points' coordinates are unreliable and
                                        # jump erratically (mean step displacement ~2x, max ~7x that of
                                        # visible points on this dataset), so segments touching an
@@ -199,8 +199,8 @@ def main(track_fn, results_root, checkpoint, task, task_config, episode, view, s
             pred_px = np.stack([pred_window[..., 0] * Ws, pred_window[..., 1] * Hs], axis=-1).astype(np.int32)
 
             # one batched call draws every GT point's visible run(s) of the 16-step polyline in green;
-            # segments spanning an occluded frame are skipped, since CoTracker's position estimate
-            # while occluded is unreliable (see gt_vis comment above)
+            # Segments spanning an invisible frame are skipped even though the simulator retains
+            # their exact finite projection (see gt_vis comment above).
             gt_polylines = [
                 gt_px[run[0]:run[-1] + 1, i, None, :]
                 for i in range(gt_px.shape[1])
