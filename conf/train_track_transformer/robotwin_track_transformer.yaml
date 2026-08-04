@@ -42,7 +42,7 @@ lbd_img: 1.0
 dim: 384
 dim_head: null
 heads: 8
-depth: 8
+depth: 4
 
 img_size: [240, 320]
 frame_stack: 1
